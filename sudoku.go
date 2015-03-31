@@ -114,28 +114,28 @@ func isSolved(game Game) bool {
 	return true
 }
 
-
-
 //////////////////////////////////////////
 // Constraint propagation (CSP)
 
+type Variable interface {
+	Domain() domain.Domain
+	SetDomain(domain.Domain)
+}
+
 type constraintFn func(values []int) bool
 
-// Constraints are still coupled to the game via Cell. I guess this
-// could be removed by introducing an interface that had Domain() and
-// SetNewDomain() functions
 type constraint struct {
-	Variables  []*Cell
+	Variables  []Variable
 	constraint constraintFn
 }
 
 type domainFunc func([]int)
 
-func applyTo(variables []*Cell, list []int, cb domainFunc) {
+func applyTo(variables []Variable, list []int, cb domainFunc) {
 	if len(variables) == 0 {
 		cb(list)
 	} else {
-		variables[0].domain.ForAll(func(val int) {
+		variables[0].Domain().ForAll(func(val int) {
 			var newList = append(list, val)
 			applyTo(variables[1:], newList, cb)
 		})
@@ -157,7 +157,7 @@ func propagateConstraint(constraint constraint) {
 	})
 
 	for i, variable := range constraint.Variables {
-		variable.domain = newDomains[i]
+		variable.SetDomain(newDomains[i])
 	}
 }
 
@@ -169,6 +169,14 @@ func propagateConstraints(constraints []constraint) {
 
 //////////////////////////////////////////
 // Game<->CSP adapter
+
+func (cell *Cell) Domain() domain.Domain {
+	return cell.domain
+}
+
+func (cell *Cell) SetDomain(domain domain.Domain) {
+	cell.domain = domain
+}
 
 func hasOneToNine(values []int) bool {
 	var set [10]int // coming in as 1..9, not 0..8
@@ -187,17 +195,26 @@ func notEqual(values []int) bool {
 	return values[0] != values[1]
 }
 
+// Sigh...
+func CellToVariable(cells []*Cell) []Variable {
+	variables := make([]Variable, len(cells))
+	for i := range cells {
+		variables[i] = cells[i]
+	}
+	return variables
+}
+
 func blockConstraints(game Game) []constraint {
 	var constraints = make([]constraint, 3*len(game.Cells))
 	for i := 0; i < len(game.Cells); i += 1 {
-		var rows = row(game, i)
-		var cols = col(game, i)
-		var blocks = block(game, i)
-		constraints[3*i].Variables = append([]*Cell(nil), blocks[:]...)
+		var rows = CellToVariable(row(game, i))
+		var cols = CellToVariable(col(game, i))
+		var blocks = CellToVariable(block(game, i))
+		constraints[3*i].Variables = append([]Variable(nil), blocks[:]...)
 		constraints[3*i].constraint = hasOneToNine
-		constraints[3*i+1].Variables = append([]*Cell(nil), rows[:]...)
+		constraints[3*i+1].Variables = append([]Variable(nil), rows[:]...)
 		constraints[3*i+1].constraint = hasOneToNine
-		constraints[3*i+2].Variables = append([]*Cell(nil), cols[:]...)
+		constraints[3*i+2].Variables = append([]Variable(nil), cols[:]...)
 		constraints[3*i+2].constraint = hasOneToNine
 	}
 	return constraints
@@ -207,9 +224,9 @@ func arcConstraintsOnCells(cells []*Cell) []constraint {
 	var constraints []constraint
 	for this := range cells {
 		for that := range cells {
-			if (this != that) {
+			if this != that {
 				var constraint constraint
-				constraint.Variables = []*Cell{cells[this], cells[that]}
+				constraint.Variables = []Variable{cells[this], cells[that]}
 				constraint.constraint = notEqual
 				constraints = append(constraints, constraint)
 			}
